@@ -1,0 +1,88 @@
+import requests
+import time
+from statistics import mean, stdev
+import math
+
+# === CONFIG ===
+BOT_TOKEN = "8362738252:AAFpdIZZIQRnfO2xlO4UqK9bCFrFzt6SWUk"
+CHAT_ID = "1873831001"
+PAIR = "EUR/USD"
+INTERVAL = 5 * 60  # 5 minutes
+
+# === Function to get latest price data from free API ===
+def get_prices():
+    url = "https://api.exchangerate.host/timeseries?start_date=2025-07-20&end_date=2025-07-26&base=EUR&symbols=USD"
+    r = requests.get(url).json()
+    rates = [v["USD"] for v in r["rates"].values()]
+    return rates[-20:]  # last 20 candles (days as substitute for minutes)
+
+# === Technical Indicators ===
+def moving_average(data, period=10):
+    return mean(data[-period:])
+
+def rsi(data, period=14):
+    gains = [max(0, data[i+1] - data[i]) for i in range(len(data)-1)]
+    losses = [max(0, data[i] - data[i+1]) for i in range(len(data)-1)]
+    avg_gain = mean(gains[-period:])
+    avg_loss = mean(losses[-period:]) or 1
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+def bollinger_bands(data, period=20):
+    ma = mean(data[-period:])
+    sd = stdev(data[-period:])
+    upper = ma + 2 * sd
+    lower = ma - 2 * sd
+    return upper, lower
+
+# === Signal Logic ===
+def generate_signal(prices):
+    ma = moving_average(prices)
+    rsi_value = rsi(prices)
+    upper, lower = bollinger_bands(prices)
+    current = prices[-1]
+
+    buy = (current < ma) and (rsi_value < 30) and (current <= lower)
+    sell = (current > ma) and (rsi_value > 70) and (current >= upper)
+
+    if buy:
+        return "BUY (UP)"
+    elif sell:
+        return "SELL (DOWN)"
+    else:
+        return "NO TRADE"
+
+# === Telegram Send ===
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, data=data)
+
+# === Main Loop ===
+while True:
+    try:
+        prices = get_prices()
+        signal = generate_signal(prices)
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        message = (
+            f"📊 *Binomo Signal Alert*\n\n"
+            f"📅 Time: `{now}`\n"
+            f"💱 Pair: *{PAIR}*\n"
+            f"📈 Signal: *{signal}*\n"
+            f"🧠 Based on: Moving Average, RSI, Bollinger Bands\n\n"
+            f"⚠️ Use proper money management.\n"
+            f"#Binomo #Signal #TradingBot"
+        )
+
+        if signal != "NO TRADE":
+            send_telegram(message)
+
+        time.sleep(INTERVAL)
+    except Exception as e:
+        print("Error:", e)
+        time.sleep(INTERVAL)
